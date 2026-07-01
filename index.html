@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R&M To-Do List – The Bowlo Leichhardt</title>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<style>
+  /* ── TOKENS ── */
+  :root {
+    --navy:    #0D2141;
+    --teal:    #0D3A3D;
+    --amber:   #f59e0b;
+    --white:   #ffffff;
+    --offwhite:#f4f6f9;
+    --mid:     #e2e8f0;
+    --text:    #1a202c;
+    --muted:   #64748b;
+
+    --critical:#7f1d1d;
+    --high:    #dc2626;
+    --medium:  #d97706;
+    --low:     #16a34a;
+
+    --status-unassigned: #64748b;
+    --status-staff:      #2563eb;
+    --status-volunteer:  #7c3aed;
+    --status-tradie:     #0891b2;
+    --status-inprogress: #d97706;
+    --status-completed:  #16a34a;
+
+    --radius: 8px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.10);
+    --shadow-lg: 0 4px 20px rgba(0,0,0,0.14);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--offwhite);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  .app-header {
+    background: var(--navy);
+    color: var(--white);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-logo {
+    height: 38px;
+    width: auto;
+  }
+  .header-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--white);
+    line-height: 1.2;
+  }
+  .header-sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.65);
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .user-chip {
+    font-size: 12px;
+    color: rgba(255,255,255,0.8);
+    background: rgba(255,255,255,0.12);
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .btn-signout {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.7);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .btn-signout:hover { background: rgba(255,255,255,0.1); }
+
+  /* ── SCREENS ── */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ── LOGIN SCREEN ── */
+  #screen-login {
+    min-height: 100vh;
+    background: var(--navy);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+  #screen-login.active { display: flex; }
+  .login-card {
+    background: var(--white);
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 340px;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+  }
+  .login-logo { height: 72px; margin-bottom: 16px; }
+  .login-card h1 { font-size: 20px; color: var(--navy); margin-bottom: 4px; }
+  .login-card p { font-size: 14px; color: var(--muted); margin-bottom: 28px; }
+  .btn-login {
+    background: var(--navy);
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 28px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.15s;
+  }
+  .btn-login:hover { background: #1a3a6b; }
+  .login-note { font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 8px; }
+
+  /* ── LIST SCREEN ── */
+  .list-toolbar {
+    background: var(--white);
+    border-bottom: 1px solid var(--mid);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: sticky;
+    top: 60px;
+    z-index: 90;
+  }
+  .toolbar-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .search-wrap {
+    position: relative;
+    flex: 1;
+  }
+  .search-wrap svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .search-input {
+    width: 100%;
+    padding: 9px 12px 9px 34px;
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    font-size: 14px;
+    background: var(--offwhite);
+    outline: none;
+    transition: border 0.15s;
+  }
+  .search-input:focus { border-color: var(--navy); background: var(--white); }
+
+  .btn-new {
+    background: var(--amber);
+    color: var(--navy);
+    border: none;
+    border-radius: var(--radius);
+    padding: 9px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s;
+  }
+  .btn-new:hover { background: #e08d00; }
+
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .filter-select {
+    border: 1px solid var(--mid);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 13px;
+    background: var(--offwhite);
+    color: var(--text);
+    outline: none;
+    cursor: pointer;
+    transition: border 0.15s;
+  }
+  .filter-select:focus, .filter-select.active-filter { border-color: var(--navy); background: var(--white); }
+  .filter-clear {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 5px 8px;
+    border-radius: 20px;
+  }
+  .filter-clear:hover { color: var(--navy); background: var(--mid); }
+
+  .list-count {
+    padding: 8px 16px 0;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .cards-container {
+    padding: 8px 12px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* ── ITEM CARD ── */
+  .item-card {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    overflow: hidden;
+    cursor: pointer;
+    transition: box-shadow 0.15s, transform 0.1s;
+    border-left: 5px solid var(--mid);
+  }
+  .item-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+  .item-card.urgency-critical { border-left-color: var(--critical); }
+  .item-card.urgency-high     { border-left-color: var(--high); }
+  .item-card.urgency-medium   { border-left-color: var(--medium); }
+  .item-card.urgency-low      { border-left-color: var(--low); }
+
+  .card-thumb {
+    width: 72px;
+    min-width: 72px;
+    background: var(--mid);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .card-thumb-placeholder {
+    color: var(--muted);
+    opacity: 0.5;
+  }
+
+  .card-body {
+    padding: 10px 12px;
+    flex: 1;
+    min-width: 0;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--navy);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    margin-bottom: 5px;
+    line-height: 1.3;
+  }
+  .card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .badge-urgency-critical { background: #fef2f2; color: var(--critical); border: 1px solid #fecaca; }
+  .badge-urgency-high     { background: #fef2f2; color: var(--high);     border: 1px solid #fecaca; }
+  .badge-urgency-medium   { background: #fffbeb; color: var(--medium);   border: 1px solid #fde68a; }
+  .badge-urgency-low      { background: #f0fdf4; color: var(--low);      border: 1px solid #bbf7d0; }
+
+  .badge-status-Unassigned  { background: #f1f5f9; color: var(--status-unassigned); border: 1px solid #cbd5e1; }
+  .badge-status-Staff       { background: #eff6ff; color: var(--status-staff);      border: 1px solid #bfdbfe; }
+  .badge-status-Volunteer   { background: #f5f3ff; color: var(--status-volunteer);  border: 1px solid #ddd6fe; }
+  .badge-status-Tradie      { background: #ecfeff; color: var(--status-tradie);     border: 1px solid #a5f3fc; }
+  .badge-status-InProgress  { background: #fffbeb; color: var(--status-inprogress); border: 1px solid #fde68a; }
+  .badge-status-Completed   { background: #f0fdf4; color: var(--status-completed);  border: 1px solid #bbf7d0; }
+
+  .card-location {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .card-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    color: var(--muted);
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-state svg { margin-bottom: 12px; opacity: 0.3; }
+  .empty-state h3 { font-size: 16px; color: var(--text); margin-bottom: 6px; }
+  .empty-state p  { font-size: 14px; }
+
+  .loading-spinner {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* ── FORM SCREEN ── */
+  .form-header {
+    background: var(--white);
+    border-bottom: 1px solid var(--mid);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 60px;
+    z-index: 90;
+  }
+  .btn-back {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--navy);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 6px 0;
+  }
+  .btn-back:hover { color: #1a3a6b; }
+  .form-header-title { font-size: 16px; font-weight: 700; color: var(--navy); }
+
+  .form-body {
+    padding: 16px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding-bottom: 80px;
+  }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+  .form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+    letter-spacing: 0.02em;
+  }
+  .form-label .req { color: var(--high); margin-left: 2px; }
+  .form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    font-size: 14px;
+    color: var(--text);
+    background: var(--white);
+    outline: none;
+    transition: border 0.15s;
+    font-family: inherit;
+  }
+  .form-control:focus { border-color: var(--navy); }
+  textarea.form-control { min-height: 100px; resize: vertical; }
+  select.form-control { cursor: pointer; }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--offwhite);
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+  }
+  .toggle-label { font-size: 14px; color: var(--text); flex: 1; }
+  .toggle {
+    width: 44px;
+    height: 24px;
+    background: var(--mid);
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+    border: none;
+    outline: none;
+    flex-shrink: 0;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: var(--white);
+    border-radius: 50%;
+    top: 3px;
+    left: 3px;
+    transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle.on { background: var(--navy); }
+  .toggle.on::after { left: 23px; }
+
+  /* File upload */
+  .upload-zone {
+    border: 2px dashed var(--mid);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border 0.15s, background 0.15s;
+    background: var(--offwhite);
+  }
+  .upload-zone:hover, .upload-zone.dragover { border-color: var(--navy); background: #f0f4ff; }
+  .upload-zone input { display: none; }
+  .upload-zone-text { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .upload-zone-text strong { color: var(--navy); }
+
+  .file-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .file-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--white);
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    padding: 7px 10px;
+    font-size: 13px;
+  }
+  .file-chip-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-chip-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .file-chip-remove:hover { color: var(--high); }
+
+  .btn-submit {
+    background: var(--navy);
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    padding: 13px 24px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.15s, opacity 0.15s;
+    margin-top: 8px;
+  }
+  .btn-submit:hover:not(:disabled) { background: #1a3a6b; }
+  .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .form-progress {
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 10px;
+    min-height: 18px;
+  }
+
+  /* ── DETAIL SCREEN ── */
+  .detail-header {
+    background: var(--white);
+    border-bottom: 1px solid var(--mid);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 60px;
+    z-index: 90;
+  }
+  .detail-header-title { font-size: 16px; font-weight: 700; color: var(--navy); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .detail-body {
+    padding: 16px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding-bottom: 100px;
+  }
+
+  .detail-hero-img {
+    width: 100%;
+    max-height: 260px;
+    object-fit: cover;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    display: block;
+  }
+
+  .detail-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--navy);
+    margin-bottom: 10px;
+    word-wrap: break-word;
+  }
+
+  .detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .detail-section {
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+  }
+  .detail-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .detail-field { }
+  .detail-field-label { font-size: 11px; color: var(--muted); margin-bottom: 2px; font-weight: 500; }
+  .detail-field-value { font-size: 14px; color: var(--text); font-weight: 500; }
+  .detail-field.full { grid-column: 1 / -1; }
+
+  .detail-text-block {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  /* Status changer */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .status-row label { font-size: 13px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+  .status-select {
+    flex: 1;
+    min-width: 160px;
+    padding: 8px 12px;
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--white);
+    outline: none;
+    cursor: pointer;
+    transition: border 0.15s;
+  }
+  .status-select:focus { border-color: var(--navy); }
+  .btn-update-status {
+    background: var(--navy);
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .btn-update-status:hover { background: #1a3a6b; }
+
+  /* Update log */
+  .update-log-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .update-log-entry {
+    background: var(--offwhite);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    border-left: 3px solid var(--teal);
+  }
+  .update-log-meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .update-log-text {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .update-log-empty { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 12px; }
+
+  .update-note-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    font-size: 14px;
+    color: var(--text);
+    background: var(--white);
+    outline: none;
+    font-family: inherit;
+    min-height: 80px;
+    resize: vertical;
+    transition: border 0.15s;
+    margin-bottom: 8px;
+  }
+  .update-note-input:focus { border-color: var(--navy); }
+
+  .update-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .btn-submit-note {
+    background: var(--teal);
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  .btn-submit-note:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-submit-note:hover:not(:disabled) { background: #0a2d30; }
+
+  .btn-complete {
+    background: var(--low);
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-complete:hover { background: #15803d; }
+  .btn-complete.already-done {
+    background: var(--mid);
+    color: var(--muted);
+    cursor: default;
+  }
+
+  /* Attachments */
+  .attachment-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .attachment-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--offwhite);
+    border: 1px solid var(--mid);
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: var(--navy);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s;
+  }
+  .attachment-link:hover { background: var(--mid); }
+
+  .attachment-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .attachment-thumb-icon { color: var(--muted); flex-shrink: 0; }
+  .attachment-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .btn-add-attachment {
+    background: none;
+    border: 2px dashed var(--mid);
+    border-radius: var(--radius);
+    padding: 10px;
+    width: 100%;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+    transition: border 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-add-attachment:hover { border-color: var(--navy); color: var(--navy); }
+  #detail-attach-input { display: none; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--navy);
+    color: var(--white);
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 999;
+    transition: transform 0.3s;
+    white-space: nowrap;
+    box-shadow: var(--shadow-lg);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { background: var(--low); }
+  .toast.error { background: var(--high); }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .filter-row { gap: 6px; }
+    .filter-select { font-size: 12px; padding: 4px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="screen-login" class="screen active">
+  <div class="login-card">
+    <img class="login-logo" src="https://leichhardtbowlo.github.io/director-reports/bowlo-logo.png" alt="The Bowlo" onerror="this.style.display='none'">
+    <h1>R&M To-Do List</h1>
+    <p>Repairs &amp; Maintenance · Leichhardt Bowlo</p>
+    <button class="btn-login" onclick="signIn()">Sign in with Microsoft 365</button>
+  </div>
+  <p class="login-note">Leichhardt Bowling Club staff &amp; management only</p>
+</div>
+
+<!-- APP HEADER (shown after login) -->
+<header class="app-header" id="app-header" style="display:none">
+  <div class="header-left">
+    <img class="header-logo" src="https://leichhardtbowlo.github.io/director-reports/bowlo-logo.png" alt="" onerror="this.style.display='none'">
+    <div>
+      <div class="header-title">R&M To-Do List</div>
+      <div class="header-sub">Repairs &amp; Maintenance</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="user-chip" id="user-chip"></span>
+    <button class="btn-signout" onclick="signOut()">Sign out</button>
+  </div>
+</header>
+
+<!-- LIST SCREEN -->
+<div id="screen-list" class="screen">
+  <div class="list-toolbar">
+    <div class="toolbar-top">
+      <div class="search-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input class="search-input" id="search-input" type="text" placeholder="Search issues…" oninput="renderCards()">
+      </div>
+      <button class="btn-new" onclick="showScreen('form')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        New
+      </button>
+    </div>
+    <div class="filter-row">
+      <select class="filter-select" id="filter-urgency" onchange="renderCards()">
+        <option value="">Urgency: All</option>
+        <option value="Critical">Critical</option>
+        <option value="High">High</option>
+        <option value="Medium">Medium</option>
+        <option value="Low">Low</option>
+      </select>
+      <select class="filter-select" id="filter-status" onchange="renderCards()">
+        <option value="">Status: All</option>
+        <option value="Unassigned">Unassigned</option>
+        <option value="Staff">Assigned to Staff</option>
+        <option value="Volunteer">Assigned to Volunteer</option>
+        <option value="Tradie">Assigned to Tradie</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <select class="filter-select" id="filter-category" onchange="renderCards()">
+        <option value="">Category: All</option>
+        <option value="Safety / Hazards">Safety / Hazards</option>
+        <option value="Electrical">Electrical</option>
+        <option value="Facilities / Building">Facilities / Building</option>
+        <option value="Furniture / Fixtures">Furniture / Fixtures</option>
+        <option value="Cleaning">Cleaning</option>
+      </select>
+      <button class="filter-clear" onclick="clearFilters()">Clear</button>
+    </div>
+  </div>
+  <div class="list-count" id="list-count"></div>
+  <div class="cards-container" id="cards-container">
+    <div class="loading-spinner">Loading…</div>
+  </div>
+</div>
+
+<!-- NEW REQUEST FORM SCREEN -->
+<div id="screen-form" class="screen">
+  <div class="form-header">
+    <button class="btn-back" onclick="showScreen('list')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Back
+    </button>
+    <span class="form-header-title">New Request</span>
+  </div>
+  <div class="form-body">
+    <div class="form-group">
+      <label class="form-label">Issue title <span class="req">*</span></label>
+      <input type="text" class="form-control" id="f-title" placeholder="Brief description of the issue" oninput="checkSubmit()">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category <span class="req">*</span></label>
+      <select class="form-control" id="f-category" onchange="checkSubmit()">
+        <option value="">Select a category</option>
+        <option>Safety / Hazards</option>
+        <option>Electrical</option>
+        <option>Facilities / Building</option>
+        <option>Furniture / Fixtures</option>
+        <option>Cleaning</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Urgency <span class="req">*</span></label>
+      <select class="form-control" id="f-urgency" onchange="checkSubmit()">
+        <option value="">Select urgency level</option>
+        <option>Critical</option>
+        <option>High</option>
+        <option>Medium</option>
+        <option>Low</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <select class="form-control" id="f-location">
+        <option value="">Select where the issue is</option>
+        <option>Bar area</option>
+        <option>Gaming Room</option>
+        <option>Kitchen / Auditorium</option>
+        <option>Beer Garden / Family Area</option>
+        <option>Car Park / Street Frontage</option>
+        <option>Greens / Surrounds</option>
+        <option>Office / Admin</option>
+        <option>Toilets / Amenities</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Details <span class="req">*</span></label>
+      <textarea class="form-control" id="f-details" placeholder="Describe the issue in full. Include any relevant observations, safety concerns, or context." oninput="checkSubmit()"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Recurring issue?</label>
+      <div class="toggle-row">
+        <span class="toggle-label" id="recurring-label">No</span>
+        <button class="toggle" id="recurring-toggle" onclick="toggleRecurring()" aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="form-group" id="frequency-group" style="display:none">
+      <label class="form-label">Frequency</label>
+      <input type="text" class="form-control" id="f-frequency" placeholder="e.g. Weekly, Every rain event">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Photos / Attachments</label>
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('f-files').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted)"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        <div class="upload-zone-text"><strong>Tap to add photos</strong> or drag &amp; drop</div>
+        <div class="upload-zone-text" style="font-size:11px;margin-top:4px">Images, PDFs, documents</div>
+        <input type="file" id="f-files" multiple accept="image/*,.pdf,.doc,.docx" onchange="handleFileSelect(event)">
+      </div>
+      <div class="file-list" id="file-list"></div>
+    </div>
+    <button class="btn-submit" id="btn-submit" disabled onclick="submitRequest()">Submit Request</button>
+    <div class="form-progress" id="form-progress"></div>
+  </div>
+</div>
+
+<!-- DETAIL SCREEN -->
+<div id="screen-detail" class="screen">
+  <div class="detail-header">
+    <button class="btn-back" onclick="showScreen('list')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Back
+    </button>
+    <span class="detail-header-title" id="detail-header-title">Issue Detail</span>
+  </div>
+  <div class="detail-body" id="detail-body">
+    <div class="loading-spinner">Loading…</div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CONFIG ──
+const CLIENT_ID    = 'f7acd525-cee7-4846-9fd3-58a22b461559'; // UPDATE with new app registration
+const TENANT_ID    = '3e8f57de-d795-48c9-8537-0b1caae52c09';
+const REDIRECT_URI = 'https://leichhardtbowlo.github.io/rm-requests/index.html';
+const LIST_NAME    = 'Repairs  Maintenance Request'; // double space - critical
+const DRIVE_FOLDER = 'RM Attachments';
+const SP_HOST      = 'leichhardtbowlingclub.sharepoint.com';
+
+const URGENCY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+
+const STATUS_LABELS = {
+  'Unassigned':  'Unassigned',
+  'Staff':       'Assigned to Staff',
+  'Volunteer':   'Assigned to Volunteer',
+  'Tradie':      'Assigned to Tradie',
+  'In Progress': 'In Progress',
+  'Completed':   'Completed'
+};
+
+// ── MSAL ──
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: REDIRECT_URI
+  },
+  cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
+};
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const scopes = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'https://graph.microsoft.com/Files.ReadWrite.All'];
+
+let currentUser = null;
+let siteId = null;
+let listId = null;
+let driveId = null;
+let allItems = [];
+let selectedFiles = [];
+let currentItem = null;
+
+// ── AUTH ──
+async function signIn() {
+  try {
+    await msalInstance.handleRedirectPromise();
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      currentUser = accounts[0];
+      onSignedIn();
+    } else {
+      await msalInstance.loginPopup({ scopes });
+      currentUser = msalInstance.getAllAccounts()[0];
+      onSignedIn();
+    }
+  } catch (e) {
+    showToast('Sign in failed: ' + e.message, 'error');
+  }
+}
+
+async function getToken() {
+  try {
+    const res = await msalInstance.acquireTokenSilent({ scopes, account: currentUser });
+    return res.accessToken;
+  } catch {
+    const res = await msalInstance.acquireTokenPopup({ scopes });
+    return res.accessToken;
+  }
+}
+
+function signOut() {
+  msalInstance.logout();
+}
+
+async function onSignedIn() {
+  document.getElementById('app-header').style.display = 'flex';
+  const name = currentUser.name || currentUser.username;
+  document.getElementById('user-chip').textContent = name;
+  showScreen('list');
+  await initSiteAndList();
+  await loadItems();
+}
+
+// ── API HELPERS ──
+async function apiGet(url) {
+  const token = await getToken();
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function apiPost(url, body) {
+  const token = await getToken();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function apiPatch(url, body) {
+  const token = await getToken();
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.status === 204 ? null : res.json();
+}
+
+async function apiPut(url, data, contentType) {
+  const token = await getToken();
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType || 'application/octet-stream' },
+    body: data
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── INIT ──
+async function initSiteAndList() {
+  const siteRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${SP_HOST}:/`);
+  siteId = siteRes.id;
+
+  const listsRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$filter=displayName eq '${encodeURIComponent(LIST_NAME)}'`);
+  listId = listsRes.value[0].id;
+
+  // Get drive for file uploads
+  try {
+    const drivesRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/drives`);
+    // Use the Documents drive (default)
+    driveId = drivesRes.value.find(d => d.name === 'Documents' || d.webUrl.endsWith('/Shared%20Documents'))?.id || drivesRes.value[0].id;
+  } catch(e) {
+    console.warn('Drive init warning:', e);
+  }
+}
+
+// ── LOAD ITEMS ──
+async function loadItems() {
+  try {
+    const fields = 'Title,Status,Urgency,Category,Location,Recurring,Frequency,Details,Actioned,Action_x0020_Notes,Date_x0020_Created,Preview_x0020_Image_x0020_URL,Assign_x0020_to_x0020_group,Value_x0020_in_x0020_kind,Attachments2,id,Created,Author';
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields(select=${fields})&$top=999`;
+    const res = await apiGet(url);
+    allItems = res.value.sort((a, b) => {
+      const ua = URGENCY_ORDER[a.fields.Urgency] ?? 99;
+      const ub = URGENCY_ORDER[b.fields.Urgency] ?? 99;
+      if (ua !== ub) return ua - ub;
+      return new Date(b.fields.Created || 0) - new Date(a.fields.Created || 0);
+    });
+    renderCards();
+  } catch (e) {
+    document.getElementById('cards-container').innerHTML = `<div class="empty-state"><p style="color:var(--high)">Failed to load items: ${e.message}</p></div>`;
+  }
+}
+
+// ── RENDER CARDS ──
+function renderCards() {
+  const search   = document.getElementById('search-input').value.toLowerCase();
+  const urgency  = document.getElementById('filter-urgency').value;
+  const status   = document.getElementById('filter-status').value;
+  const category = document.getElementById('filter-category').value;
+
+  let filtered = allItems.filter(item => {
+    const f = item.fields;
+    const title = (f.Title || '').toLowerCase();
+    if (search && !title.includes(search)) return false;
+    if (urgency  && f.Urgency  !== urgency)  return false;
+    if (category && f.Category !== category) return false;
+    if (status) {
+      const itemStatus = f.Status?.[' Value'] || f.Status?.Value || f.Status || '';
+      if (itemStatus !== status) return false;
+    }
+    return true;
+  });
+
+  const count = filtered.length;
+  document.getElementById('list-count').textContent = `${count} item${count !== 1 ? 's' : ''}`;
+
+  if (filtered.length === 0) {
+    document.getElementById('cards-container').innerHTML = `
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h4"/></svg>
+        <h3>No items found</h3>
+        <p>Try adjusting your filters, or <button onclick="showScreen('form')" style="background:none;border:none;color:var(--navy);cursor:pointer;font-weight:600;font-size:14px;padding:0">log a new request</button>.</p>
+      </div>`;
+    return;
+  }
+
+  document.getElementById('cards-container').innerHTML = filtered.map(item => {
+    const f = item.fields;
+    const urgency = f.Urgency || '';
+    const status  = f.Status?.Value || f.Status || 'Unassigned';
+    const statusLabel = STATUS_LABELS[status] || status;
+    const imgUrl  = f.Preview_x0020_Image_x0020_URL || '';
+    const thumb   = imgUrl
+      ? `<img src="${imgUrl}" alt="" onerror="this.parentElement.innerHTML='<span class=card-thumb-placeholder><svg width=24 height=24 viewBox=0 0 24 24 fill=none stroke=currentColor stroke-width=1.5><rect x=3 y=3 width=18 height=18 rx=2/><circle cx=8.5 cy=8.5 r=1.5/><path d=m21 15-5-5L5 21/></svg></span>'">`
+      : `<span class="card-thumb-placeholder"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>`;
+
+    return `
+    <div class="item-card urgency-${urgency.toLowerCase()}" onclick="openDetail('${item.id}')">
+      <div class="card-thumb">${thumb}</div>
+      <div class="card-body">
+        <div class="card-title">${escHtml(f.Title || 'Untitled')}</div>
+        <div class="card-meta">
+          <span class="badge badge-urgency-${urgency.toLowerCase()}">${urgency || '–'}</span>
+          <span class="badge badge-status-${status.replace(/\s+/g,'')}">${statusLabel}</span>
+          ${f.Category ? `<span class="badge" style="background:var(--offwhite);border:1px solid var(--mid);color:var(--muted)">${escHtml(f.Category)}</span>` : ''}
+        </div>
+        ${f.Location ? `<div class="card-location">📍 ${escHtml(f.Location)}</div>` : ''}
+      </div>
+      <div class="card-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+    </div>`;
+  }).join('');
+}
+
+function clearFilters() {
+  document.getElementById('filter-urgency').value  = '';
+  document.getElementById('filter-status').value   = '';
+  document.getElementById('filter-category').value = '';
+  document.getElementById('search-input').value    = '';
+  renderCards();
+}
+
+// ── SCREEN NAV ──
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(`screen-${name}`).classList.add('active');
+  if (name !== 'login') document.getElementById('app-header').style.display = 'flex';
+  window.scrollTo(0, 0);
+}
+
+// ── FORM ──
+let recurringOn = false;
+
+function toggleRecurring() {
+  recurringOn = !recurringOn;
+  const btn = document.getElementById('recurring-toggle');
+  btn.classList.toggle('on', recurringOn);
+  btn.setAttribute('aria-pressed', recurringOn);
+  document.getElementById('recurring-label').textContent = recurringOn ? 'Yes' : 'No';
+  document.getElementById('frequency-group').style.display = recurringOn ? 'block' : 'none';
+}
+
+function checkSubmit() {
+  const ok = document.getElementById('f-title').value.trim() &&
+             document.getElementById('f-category').value &&
+             document.getElementById('f-urgency').value &&
+             document.getElementById('f-details').value.trim();
+  document.getElementById('btn-submit').disabled = !ok;
+}
+
+function handleFileSelect(e) {
+  for (const file of e.target.files) addFile(file);
+  e.target.value = '';
+}
+function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('dragover'); }
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragover');
+  for (const file of e.dataTransfer.files) addFile(file);
+}
+function addFile(file) {
+  selectedFiles.push(file);
+  renderFileList();
+}
+function removeFile(i) {
+  selectedFiles.splice(i, 1);
+  renderFileList();
+}
+function renderFileList() {
+  document.getElementById('file-list').innerHTML = selectedFiles.map((f, i) => `
+    <div class="file-chip">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
+      <span class="file-chip-name">${escHtml(f.name)}</span>
+      <button class="file-chip-remove" onclick="removeFile(${i})">×</button>
+    </div>`).join('');
+}
+
+function setProgress(msg) {
+  document.getElementById('form-progress').textContent = msg;
+}
+
+async function submitRequest() {
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true;
+  setProgress('Creating request…');
+
+  try {
+    // 1. Create list item
+    const fields = {
+      Title:     document.getElementById('f-title').value.trim(),
+      Category:  { Value: document.getElementById('f-category').value },
+      Urgency:   { Value: document.getElementById('f-urgency').value },
+      Location:  document.getElementById('f-location').value || null,
+      Details:   document.getElementById('f-details').value.trim(),
+      Recurring: recurringOn,
+      Status:    { Value: 'Unassigned' },
+      Actioned:  false
+    };
+    if (recurringOn && document.getElementById('f-frequency').value.trim()) {
+      fields.Frequency = document.getElementById('f-frequency').value.trim();
+    }
+
+    const newItem = await apiPost(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items`,
+      { fields }
+    );
+    const itemId = newItem.id;
+
+    // 2. Upload files
+    let attachmentLinks = [];
+    if (selectedFiles.length > 0 && driveId) {
+      setProgress(`Uploading ${selectedFiles.length} file(s)…`);
+      for (const file of selectedFiles) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `RM Attachments/${itemId}/${safeName}`;
+        const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${path}:/content`;
+        const uploaded = await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
+        attachmentLinks.push(uploaded.webUrl);
+      }
+
+      // 3. Patch attachment links back to item
+      await apiPatch(
+        `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+        { Attachments2: attachmentLinks.join('\n'), Preview_x0020_Image_x0020_URL: attachmentLinks[0] }
+      );
+    }
+
+    setProgress('');
+    showToast('Request submitted successfully', 'success');
+    resetForm();
+    await loadItems();
+    showScreen('list');
+  } catch (e) {
+    btn.disabled = false;
+    setProgress('Error: ' + e.message);
+    showToast('Submission failed', 'error');
+  }
+}
+
+function resetForm() {
+  document.getElementById('f-title').value    = '';
+  document.getElementById('f-category').value = '';
+  document.getElementById('f-urgency').value  = '';
+  document.getElementById('f-location').value = '';
+  document.getElementById('f-details').value  = '';
+  document.getElementById('f-frequency').value = '';
+  selectedFiles = [];
+  renderFileList();
+  recurringOn = false;
+  document.getElementById('recurring-toggle').classList.remove('on');
+  document.getElementById('recurring-label').textContent = 'No';
+  document.getElementById('frequency-group').style.display = 'none';
+  document.getElementById('btn-submit').disabled = true;
+  setProgress('');
+}
+
+// ── DETAIL VIEW ──
+async function openDetail(itemId) {
+  showScreen('detail');
+  document.getElementById('detail-body').innerHTML = '<div class="loading-spinner">Loading…</div>';
+
+  try {
+    const fields = 'Title,Status,Urgency,Category,Location,Recurring,Frequency,Details,Actioned,Action_x0020_Notes,Date_x0020_Created,Preview_x0020_Image_x0020_URL,Assign_x0020_to_x0020_group,Value_x0020_in_x0020_kind,Attachments2,id,Created,Author';
+    const item = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields(select=${fields})`);
+    currentItem = item;
+    renderDetail(item);
+  } catch (e) {
+    document.getElementById('detail-body').innerHTML = `<p style="color:var(--high);padding:20px">Error: ${e.message}</p>`;
+  }
+}
+
+function renderDetail(item) {
+  const f = item.fields;
+  const id = item.id;
+  const title   = f.Title || 'Untitled';
+  const urgency = f.Urgency || '';
+  const status  = f.Status?.Value || f.Status || 'Unassigned';
+  const statusLabel = STATUS_LABELS[status] || status;
+  const isComplete = status === 'Completed';
+
+  document.getElementById('detail-header-title').textContent = title;
+
+  // Parse update log entries
+  const rawNotes = f.Action_x0020_Notes || '';
+  const logEntries = parseUpdateLog(rawNotes);
+
+  // Parse attachments
+  const attachLinks = (f.Attachments2 || '').split('\n').filter(l => l.trim());
+  const previewUrl  = f.Preview_x0020_Image_x0020_URL || '';
+
+  // Created date
+  const created = f.Created ? new Date(f.Created).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '–';
+
+  document.getElementById('detail-body').innerHTML = `
+    ${previewUrl ? `<img class="detail-hero-img" src="${escHtml(previewUrl)}" alt="">` : ''}
+
+    <div class="detail-title">${escHtml(title)}</div>
+    <div class="detail-badges">
+      <span class="badge badge-urgency-${urgency.toLowerCase()}">${urgency || '–'}</span>
+      <span class="badge badge-status-${status.replace(/\s+/g,'')}">${statusLabel}</span>
+    </div>
+
+    <!-- Details section -->
+    <div class="detail-section">
+      <div class="detail-section-title">Issue Details</div>
+      <div class="detail-grid">
+        <div class="detail-field">
+          <div class="detail-field-label">Category</div>
+          <div class="detail-field-value">${escHtml(f.Category || '–')}</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Location</div>
+          <div class="detail-field-value">${escHtml(f.Location || '–')}</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Logged</div>
+          <div class="detail-field-value">${created}</div>
+        </div>
+        <div class="detail-field">
+          <div class="detail-field-label">Recurring</div>
+          <div class="detail-field-value">${f.Recurring ? `Yes${f.Frequency ? ' · ' + f.Frequency : ''}` : 'No'}</div>
+        </div>
+        ${f.Value_x0020_in_x0020_kind ? `
+        <div class="detail-field">
+          <div class="detail-field-label">Value in Kind</div>
+          <div class="detail-field-value">${escHtml(f.Value_x0020_in_x0020_kind)}</div>
+        </div>` : ''}
+        ${f.Assign_x0020_to_x0020_group ? `
+        <div class="detail-field">
+          <div class="detail-field-label">Assigned To</div>
+          <div class="detail-field-value">${escHtml(f.Assign_x0020_to_x0020_group)}</div>
+        </div>` : ''}
+        <div class="detail-field full">
+          <div class="detail-field-label">Description</div>
+          <div class="detail-text-block">${escHtml(f.Details || '–')}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status section -->
+    <div class="detail-section">
+      <div class="detail-section-title">Status</div>
+      <div class="status-row">
+        <label>Change status:</label>
+        <select class="status-select" id="detail-status-select">
+          ${Object.entries(STATUS_LABELS).map(([val, label]) =>
+            `<option value="${val}" ${val === status ? 'selected' : ''}>${label}</option>`
+          ).join('')}
+        </select>
+        <button class="btn-update-status" onclick="updateStatus('${id}')">Save</button>
+      </div>
+    </div>
+
+    <!-- Update log section -->
+    <div class="detail-section">
+      <div class="detail-section-title">Update Log</div>
+      <div class="update-log-entries" id="update-log-entries">
+        ${logEntries.length > 0
+          ? logEntries.map(e => `
+            <div class="update-log-entry">
+              <div class="update-log-meta">${escHtml(e.meta)}</div>
+              <div class="update-log-text">${escHtml(e.text)}</div>
+            </div>`).join('')
+          : '<div class="update-log-empty">No updates yet.</div>'
+        }
+      </div>
+      <textarea class="update-note-input" id="update-note-input" placeholder="Enter progress or update notes…" oninput="document.getElementById('btn-submit-note').disabled = !this.value.trim()"></textarea>
+      <div class="update-actions">
+        <button class="btn-submit-note" id="btn-submit-note" disabled onclick="submitNote('${id}')">Add Note</button>
+        <button class="btn-complete ${isComplete ? 'already-done' : ''}" onclick="${isComplete ? '' : `markComplete('${id}')`}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg>
+          ${isComplete ? 'Completed' : 'Mark Complete'}
+        </button>
+      </div>
+    </div>
+
+    <!-- Attachments section -->
+    <div class="detail-section">
+      <div class="detail-section-title">Attachments</div>
+      <div class="attachment-grid" id="attachment-grid">
+        ${renderAttachments(attachLinks)}
+      </div>
+      <input type="file" id="detail-attach-input" multiple accept="image/*,.pdf,.doc,.docx" onchange="uploadDetailAttachment(event, '${id}')">
+      <button class="btn-add-attachment" onclick="document.getElementById('detail-attach-input').click()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        Attach file / photo
+      </button>
+    </div>
+  `;
+}
+
+function renderAttachments(links) {
+  if (!links.length) return '<p style="font-size:13px;color:var(--muted);margin-bottom:8px">No attachments.</p>';
+  const imageExts = /\.(jpg|jpeg|png|gif|webp|heic)$/i;
+  return links.map(url => {
+    const name = decodeURIComponent(url.split('/').pop());
+    const isImg = imageExts.test(name);
+    return `
+      <a class="attachment-link" href="${escHtml(url)}" target="_blank">
+        ${isImg
+          ? `<img class="attachment-thumb" src="${escHtml(url)}" alt="">`
+          : `<svg class="attachment-thumb-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>`}
+        <span class="attachment-name">${escHtml(name)}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--muted)"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>`;
+  }).join('');
+}
+
+// ── STATUS UPDATE ──
+async function updateStatus(itemId) {
+  const newStatus = document.getElementById('detail-status-select').value;
+  try {
+    await apiPatch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+      { Status: { Value: newStatus }, Actioned: newStatus === 'Completed' }
+    );
+    showToast('Status updated', 'success');
+    await loadItems();
+    await openDetail(itemId);
+  } catch (e) {
+    showToast('Update failed: ' + e.message, 'error');
+  }
+}
+
+// ── MARK COMPLETE ──
+async function markComplete(itemId) {
+  try {
+    const now = new Date();
+    const userName = currentUser?.name || currentUser?.username || 'User';
+    const stamp = `${now.toLocaleDateString('en-AU')} ${now.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}`;
+    const completionNote = `UPDATE - ${stamp} - ${userName}\nMarked as complete.`;
+
+    const existing = currentItem?.fields?.Action_x0020_Notes || '';
+    const combined = existing ? existing + '\n' + completionNote : completionNote;
+
+    await apiPatch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+      { Status: { Value: 'Completed' }, Actioned: true, Action_x0020_Notes: combined }
+    );
+    showToast('Marked as complete', 'success');
+    await loadItems();
+    await openDetail(itemId);
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── SUBMIT NOTE ──
+async function submitNote(itemId) {
+  const noteText = document.getElementById('update-note-input').value.trim();
+  if (!noteText) return;
+
+  const btn = document.getElementById('btn-submit-note');
+  btn.disabled = true;
+
+  try {
+    const now = new Date();
+    const userName = currentUser?.name || currentUser?.username || 'User';
+    const stamp = `${now.toLocaleDateString('en-AU')} ${now.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}`;
+    const entry = `UPDATE - ${stamp} - ${userName}\n${noteText}`;
+
+    const existing = currentItem?.fields?.Action_x0020_Notes || '';
+    const combined = existing ? existing + '\n' + entry : entry;
+
+    await apiPatch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+      { Action_x0020_Notes: combined }
+    );
+    showToast('Note added', 'success');
+    await openDetail(itemId);
+  } catch (e) {
+    btn.disabled = false;
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── UPLOAD ATTACHMENT ON DETAIL ──
+async function uploadDetailAttachment(e, itemId) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  showToast('Uploading…');
+
+  try {
+    const existing = (currentItem?.fields?.Attachments2 || '').split('\n').filter(l => l.trim());
+    const newLinks = [];
+
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `RM Attachments/${itemId}/${safeName}`;
+      const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${path}:/content`;
+      const uploaded = await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
+      newLinks.push(uploaded.webUrl);
+    }
+
+    const combined = [...existing, ...newLinks].join('\n');
+    await apiPatch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
+      { Attachments2: combined }
+    );
+
+    showToast('Attachment added', 'success');
+    e.target.value = '';
+    await openDetail(itemId);
+  } catch (e2) {
+    showToast('Upload failed: ' + e2.message, 'error');
+  }
+}
+
+// ── PARSE UPDATE LOG ──
+function parseUpdateLog(raw) {
+  if (!raw) return [];
+  const entries = [];
+  const parts = raw.split(/\nUPDATE\s*-\s*/);
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const nlIdx = trimmed.indexOf('\n');
+    if (nlIdx > -1) {
+      entries.push({ meta: 'UPDATE - ' + trimmed.substring(0, nlIdx).trim(), text: trimmed.substring(nlIdx + 1).trim() });
+    } else {
+      entries.push({ meta: '', text: trimmed });
+    }
+  }
+  return entries.reverse(); // newest first
+}
+
+// ── UTILS ──
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let toastTimer;
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (type ? ' ' + type : '') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── BOOT ──
+(async () => {
+  try {
+    await msalInstance.handleRedirectPromise();
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      currentUser = accounts[0];
+      await onSignedIn();
+    }
+  } catch(e) {
+    console.warn('Boot auth check:', e);
+  }
+})();
+</script>
+</body>
+</html>
