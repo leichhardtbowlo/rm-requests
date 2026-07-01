@@ -1005,14 +1005,15 @@ async function signIn() {
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
       currentUser = accounts[0];
-      onSignedIn();
+      await onSignedIn();
     } else {
-      await msalInstance.loginPopup({ scopes });
-      currentUser = msalInstance.getAllAccounts()[0];
-      onSignedIn();
+      const loginResponse = await msalInstance.loginPopup({ scopes, prompt: 'select_account' });
+      currentUser = loginResponse.account || msalInstance.getAllAccounts()[0];
+      await onSignedIn();
     }
   } catch (e) {
-    showToast('Sign in failed: ' + e.message, 'error');
+    console.error('Microsoft 365 sign-in failed:', e);
+    showToast('Sign in failed: ' + (e.errorMessage || e.message || 'Unknown Microsoft 365 error'), 'error');
   }
 }
 
@@ -1035,8 +1036,20 @@ async function onSignedIn() {
   const name = currentUser.name || currentUser.username;
   document.getElementById('user-chip').textContent = name;
   showScreen('list');
-  await initSiteAndList();
-  await loadItems();
+  try {
+    await initSiteAndList();
+    await loadItems();
+  } catch (e) {
+    console.error('Microsoft 365 / SharePoint connection failed:', e);
+    const msg = escHtml(e.message || String(e));
+    document.getElementById('cards-container').innerHTML = `
+      <div class="empty-state">
+        <h3>Microsoft 365 connection failed</h3>
+        <p style="color:var(--high);margin-top:8px">${msg}</p>
+        <p style="margin-top:12px">Check Azure app consent, the GitHub Pages redirect URI, and the SharePoint list/library names.</p>
+      </div>`;
+    showToast('Microsoft 365 connection failed', 'error');
+  }
 }
 
 // ── API HELPERS ──
@@ -1085,24 +1098,35 @@ async function initSiteAndList() {
   const siteRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${SP_HOST}:/`);
   siteId = siteRes.id;
 
-  const listsRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$filter=displayName eq '${encodeURIComponent(LIST_NAME)}'`);
-  listId = listsRes.value[0].id;
+  // Fetch lists and match by display name. This is more reliable than using an encoded OData filter.
+  const listsRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=999`);
+  const normalise = s => String(s || '').replace(/&/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const targetList = listsRes.value.find(l => l.displayName === LIST_NAME)
+    || listsRes.value.find(l => normalise(l.displayName) === normalise(LIST_NAME))
+    || listsRes.value.find(l => normalise(l.displayName).includes('repairs maintenance request'));
+
+  if (!targetList) {
+    const available = listsRes.value.map(l => l.displayName).join(', ');
+    throw new Error(`Could not find SharePoint list "${LIST_NAME}". Available lists: ${available}`);
+  }
+  listId = targetList.id;
 
   // Get drive for file uploads
-  try {
-    const drivesRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/drives`);
-    // Use the Documents drive (default)
-    driveId = drivesRes.value.find(d => d.name === 'Documents' || d.webUrl.endsWith('/Shared%20Documents'))?.id || drivesRes.value[0].id;
-  } catch(e) {
-    console.warn('Drive init warning:', e);
+  const drivesRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/drives`);
+  const targetDrive = drivesRes.value.find(d => d.name === 'Documents')
+    || drivesRes.value.find(d => d.webUrl && d.webUrl.includes('/Shared%20Documents'))
+    || drivesRes.value[0];
+
+  if (!targetDrive) {
+    throw new Error('Could not find a SharePoint document library / drive for file uploads.');
   }
+  driveId = targetDrive.id;
 }
 
-// ── LOAD ITEMS ──
+ // ── LOAD ITEMS ──
 async function loadItems() {
   try {
-    const fields = 'Title,Status,Urgency,Category,Location,Recurring,Frequency,Details,Actioned,Action_x0020_Notes,Date_x0020_Created,Preview_x0020_Image_x0020_URL,Assign_x0020_to_x0020_group,Value_x0020_in_x0020_kind,Attachments2,id,Created,Author';
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields(select=${fields})&$top=999`;
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
     const res = await apiGet(url);
     allItems = res.value.sort((a, b) => {
       const ua = URGENCY_ORDER[a.fields.Urgency] ?? 99;
@@ -1252,12 +1276,12 @@ async function submitRequest() {
     // 1. Create list item
     const fields = {
       Title:     document.getElementById('f-title').value.trim(),
-      Category:  { Value: document.getElementById('f-category').value },
-      Urgency:   { Value: document.getElementById('f-urgency').value },
+      Category:  document.getElementById('f-category').value,
+      Urgency:   document.getElementById('f-urgency').value,
       Location:  document.getElementById('f-location').value || null,
       Details:   document.getElementById('f-details').value.trim(),
       Recurring: recurringOn,
-      Status:    { Value: 'Unassigned' },
+      Status:    'Unassigned',
       Actioned:  false
     };
     if (recurringOn && document.getElementById('f-frequency').value.trim()) {
@@ -1324,8 +1348,7 @@ async function openDetail(itemId) {
   document.getElementById('detail-body').innerHTML = '<div class="loading-spinner">Loading…</div>';
 
   try {
-    const fields = 'Title,Status,Urgency,Category,Location,Recurring,Frequency,Details,Actioned,Action_x0020_Notes,Date_x0020_Created,Preview_x0020_Image_x0020_URL,Assign_x0020_to_x0020_group,Value_x0020_in_x0020_kind,Attachments2,id,Created,Author';
-    const item = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields(select=${fields})`);
+    const item = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`);
     currentItem = item;
     renderDetail(item);
   } catch (e) {
@@ -1476,7 +1499,7 @@ async function updateStatus(itemId) {
   try {
     await apiPatch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-      { Status: { Value: newStatus }, Actioned: newStatus === 'Completed' }
+      { Status: newStatus, Actioned: newStatus === 'Completed' }
     );
     showToast('Status updated', 'success');
     await loadItems();
@@ -1499,7 +1522,7 @@ async function markComplete(itemId) {
 
     await apiPatch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-      { Status: { Value: 'Completed' }, Actioned: true, Action_x0020_Notes: combined }
+      { Status: 'Completed', Actioned: true, Action_x0020_Notes: combined }
     );
     showToast('Marked as complete', 'success');
     await loadItems();
