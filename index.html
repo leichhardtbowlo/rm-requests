@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R&M To-Do List – The Bowlo Leichhardt</title>
-<!-- Build: RM live fix v3 - dynamic MSAL loader with CDN fallbacks -->
+<!-- Build: RM live fix v4 - click-only MSAL loader, no boot auth check -->
 <style>
   /* ── TOKENS ── */
   :root {
@@ -794,9 +794,9 @@
     <img class="login-logo" src="https://leichhardtbowlo.github.io/director-reports/bowlo-logo.png" alt="The Bowlo" onerror="this.style.display='none'">
     <h1>R&M To-Do List</h1>
     <p>Repairs &amp; Maintenance · Leichhardt Bowlo</p>
-    <button class="btn-login" onclick="signIn()">Sign in with Microsoft 365</button>
+    <button class="btn-login" id="btn-login" onclick="signIn()">Sign in with Microsoft 365</button>
   </div>
-  <p class="login-note">Leichhardt Bowling Club staff &amp; management only</p>
+  <p class="login-note">Leichhardt Bowling Club staff &amp; management only<br><span style="opacity:.65">Build v4</span></p>
 </div>
 
 <!-- APP HEADER (shown after login) -->
@@ -1054,9 +1054,17 @@ let currentItem = null;
 
 // ── AUTH ──
 async function signIn() {
+  const btn = document.getElementById('btn-login');
+  const oldText = btn ? btn.textContent : '';
   try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Loading Microsoft sign-in…';
+    }
+
     const auth = await getMsalInstance();
-    await auth.handleRedirectPromise();
+    if (btn) btn.textContent = 'Opening Microsoft sign-in…';
+
     const accounts = auth.getAllAccounts();
     if (accounts.length > 0) {
       currentUser = accounts[0];
@@ -1069,6 +1077,10 @@ async function signIn() {
   } catch (e) {
     console.error('Microsoft 365 sign-in failed:', e);
     showToast('Sign in failed: ' + (e.errorMessage || e.message || 'Unknown Microsoft 365 error'), 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText || 'Sign in with Microsoft 365';
+    }
   }
 }
 
@@ -1674,7 +1686,7 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-let toastTimer;
+var toastTimer = null;
 function showToast(msg, type) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1684,19 +1696,4 @@ function showToast(msg, type) {
 }
 
 // ── BOOT ──
-window.addEventListener('DOMContentLoaded', async () => {
-  try {
-    const auth = await getMsalInstance();
-    await auth.handleRedirectPromise();
-    const accounts = auth.getAllAccounts();
-    if (accounts.length > 0) {
-      currentUser = accounts[0];
-      await onSignedIn();
-    }
-  } catch(e) {
-    console.warn('Boot auth check:', e);
-  }
-});
-</script>
-</body>
-</html>
+// Disabled during live setup. Sign-in starts only when the button is clicked.
