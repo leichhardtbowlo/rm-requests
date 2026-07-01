@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R&M To-Do List – The Bowlo Leichhardt</title>
+<!-- Build: RM live fix v2 - lazy MSAL init -->
 <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <style>
   /* ── TOKENS ── */
@@ -987,7 +988,16 @@ const msalConfig = {
   },
   cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
 };
-const msalInstance = new msal.PublicClientApplication(msalConfig);
+let msalInstance = null;
+function getMsalInstance() {
+  if (!msalInstance) {
+    if (!window.msal || !window.msal.PublicClientApplication) {
+      throw new Error('Microsoft sign-in library has not loaded yet. Refresh the page and try again.');
+    }
+    msalInstance = new window.msal.PublicClientApplication(msalConfig);
+  }
+  return msalInstance;
+}
 const scopes = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'https://graph.microsoft.com/Files.ReadWrite.All'];
 
 let currentUser = null;
@@ -1001,14 +1011,15 @@ let currentItem = null;
 // ── AUTH ──
 async function signIn() {
   try {
-    await msalInstance.handleRedirectPromise();
-    const accounts = msalInstance.getAllAccounts();
+    const auth = getMsalInstance();
+    await auth.handleRedirectPromise();
+    const accounts = auth.getAllAccounts();
     if (accounts.length > 0) {
       currentUser = accounts[0];
       await onSignedIn();
     } else {
-      const loginResponse = await msalInstance.loginPopup({ scopes, prompt: 'select_account' });
-      currentUser = loginResponse.account || msalInstance.getAllAccounts()[0];
+      const loginResponse = await auth.loginPopup({ scopes, prompt: 'select_account' });
+      currentUser = loginResponse.account || auth.getAllAccounts()[0];
       await onSignedIn();
     }
   } catch (e) {
@@ -1018,17 +1029,19 @@ async function signIn() {
 }
 
 async function getToken() {
+  const auth = getMsalInstance();
   try {
-    const res = await msalInstance.acquireTokenSilent({ scopes, account: currentUser });
+    const res = await auth.acquireTokenSilent({ scopes, account: currentUser });
     return res.accessToken;
   } catch {
-    const res = await msalInstance.acquireTokenPopup({ scopes });
+    const res = await auth.acquireTokenPopup({ scopes });
     return res.accessToken;
   }
 }
 
 function signOut() {
-  msalInstance.logout();
+  const auth = getMsalInstance();
+  auth.logout();
 }
 
 async function onSignedIn() {
@@ -1627,10 +1640,11 @@ function showToast(msg, type) {
 }
 
 // ── BOOT ──
-(async () => {
+window.addEventListener('DOMContentLoaded', async () => {
   try {
-    await msalInstance.handleRedirectPromise();
-    const accounts = msalInstance.getAllAccounts();
+    const auth = getMsalInstance();
+    await auth.handleRedirectPromise();
+    const accounts = auth.getAllAccounts();
     if (accounts.length > 0) {
       currentUser = accounts[0];
       await onSignedIn();
@@ -1638,7 +1652,7 @@ function showToast(msg, type) {
   } catch(e) {
     console.warn('Boot auth check:', e);
   }
-})();
+});
 </script>
 </body>
 </html>
