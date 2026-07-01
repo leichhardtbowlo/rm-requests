@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R&M To-Do List – The Bowlo Leichhardt</title>
-<!-- Build: RM live fix v2 - lazy MSAL init -->
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- Build: RM live fix v3 - dynamic MSAL loader with CDN fallbacks -->
 <style>
   /* ── TOKENS ── */
   :root {
@@ -988,12 +987,57 @@ const msalConfig = {
   },
   cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
 };
-let msalInstance = null;
-function getMsalInstance() {
-  if (!msalInstance) {
-    if (!window.msal || !window.msal.PublicClientApplication) {
-      throw new Error('Microsoft sign-in library has not loaded yet. Refresh the page and try again.');
+var msalInstance = null;
+var msalLoadPromise = null;
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', reject, { once: true });
+      if (window.msal && window.msal.PublicClientApplication) resolve();
+      return;
     }
+
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load ' + src));
+    document.head.appendChild(script);
+  });
+}
+
+async function loadMsalLibrary() {
+  if (window.msal && window.msal.PublicClientApplication) return;
+  if (!msalLoadPromise) {
+    const sources = [
+      'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
+      'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js',
+      'https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js'
+    ];
+
+    msalLoadPromise = (async () => {
+      let lastError = null;
+      for (const src of sources) {
+        try {
+          await loadScriptOnce(src);
+          if (window.msal && window.msal.PublicClientApplication) return;
+        } catch (e) {
+          lastError = e;
+          console.warn('MSAL CDN failed:', src, e);
+        }
+      }
+      throw new Error('Microsoft sign-in library could not be loaded. Check browser security settings, network filtering, or try another browser. ' + (lastError ? lastError.message : ''));
+    })();
+  }
+  return msalLoadPromise;
+}
+
+async function getMsalInstance() {
+  await loadMsalLibrary();
+  if (!msalInstance) {
     msalInstance = new window.msal.PublicClientApplication(msalConfig);
   }
   return msalInstance;
@@ -1011,7 +1055,7 @@ let currentItem = null;
 // ── AUTH ──
 async function signIn() {
   try {
-    const auth = getMsalInstance();
+    const auth = await getMsalInstance();
     await auth.handleRedirectPromise();
     const accounts = auth.getAllAccounts();
     if (accounts.length > 0) {
@@ -1029,7 +1073,7 @@ async function signIn() {
 }
 
 async function getToken() {
-  const auth = getMsalInstance();
+  const auth = await getMsalInstance();
   try {
     const res = await auth.acquireTokenSilent({ scopes, account: currentUser });
     return res.accessToken;
@@ -1039,8 +1083,8 @@ async function getToken() {
   }
 }
 
-function signOut() {
-  const auth = getMsalInstance();
+async function signOut() {
+  const auth = await getMsalInstance();
   auth.logout();
 }
 
@@ -1642,7 +1686,7 @@ function showToast(msg, type) {
 // ── BOOT ──
 window.addEventListener('DOMContentLoaded', async () => {
   try {
-    const auth = getMsalInstance();
+    const auth = await getMsalInstance();
     await auth.handleRedirectPromise();
     const accounts = auth.getAllAccounts();
     if (accounts.length > 0) {
