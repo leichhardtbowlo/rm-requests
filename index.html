@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>R&M To-Do List – The Bowlo Leichhardt</title>
-<!-- Build: RM live fix v4 - click-only MSAL loader, no boot auth check -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <style>
   /* ── TOKENS ── */
   :root {
@@ -118,7 +118,7 @@
     text-align: center;
     box-shadow: var(--shadow-lg);
   }
-  .login-logo { height: 72px; margin-bottom: 16px; }
+  .login-logo { height: 72px; margin-bottom: 16px; border-radius: 14px; overflow: hidden; display: block; margin-left: auto; margin-right: auto; }
   .login-card h1 { font-size: 20px; color: var(--navy); margin-bottom: 4px; }
   .login-card p { font-size: 14px; color: var(--muted); margin-bottom: 28px; }
   .btn-login {
@@ -794,9 +794,9 @@
     <img class="login-logo" src="https://leichhardtbowlo.github.io/director-reports/bowlo-logo.png" alt="The Bowlo" onerror="this.style.display='none'">
     <h1>R&M To-Do List</h1>
     <p>Repairs &amp; Maintenance · Leichhardt Bowlo</p>
-    <button class="btn-login" id="btn-login" onclick="signIn()">Sign in with Microsoft 365</button>
+    <button class="btn-login" onclick="signIn()">Sign in with Microsoft 365</button>
   </div>
-  <p class="login-note">Leichhardt Bowling Club staff &amp; management only<br><span style="opacity:.65">Build v4</span></p>
+  <p class="login-note">Leichhardt Bowling Club staff &amp; management only</p>
 </div>
 
 <!-- APP HEADER (shown after login) -->
@@ -987,61 +987,7 @@ const msalConfig = {
   },
   cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false }
 };
-var msalInstance = null;
-var msalLoadPromise = null;
-
-function loadScriptOnce(src) {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
-    if (existing) {
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', reject, { once: true });
-      if (window.msal && window.msal.PublicClientApplication) resolve();
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('Could not load ' + src));
-    document.head.appendChild(script);
-  });
-}
-
-async function loadMsalLibrary() {
-  if (window.msal && window.msal.PublicClientApplication) return;
-  if (!msalLoadPromise) {
-    const sources = [
-      'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
-      'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js',
-      'https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js'
-    ];
-
-    msalLoadPromise = (async () => {
-      let lastError = null;
-      for (const src of sources) {
-        try {
-          await loadScriptOnce(src);
-          if (window.msal && window.msal.PublicClientApplication) return;
-        } catch (e) {
-          lastError = e;
-          console.warn('MSAL CDN failed:', src, e);
-        }
-      }
-      throw new Error('Microsoft sign-in library could not be loaded. Check browser security settings, network filtering, or try another browser. ' + (lastError ? lastError.message : ''));
-    })();
-  }
-  return msalLoadPromise;
-}
-
-async function getMsalInstance() {
-  await loadMsalLibrary();
-  if (!msalInstance) {
-    msalInstance = new window.msal.PublicClientApplication(msalConfig);
-  }
-  return msalInstance;
-}
+const msalInstance = new msal.PublicClientApplication(msalConfig);
 const scopes = ['https://graph.microsoft.com/Sites.ReadWrite.All', 'https://graph.microsoft.com/Files.ReadWrite.All'];
 
 let currentUser = null;
@@ -1053,55 +999,35 @@ let selectedFiles = [];
 let currentItem = null;
 
 // ── AUTH ──
-async function signIn() {
-  const btn = document.getElementById('btn-login');
-  const oldText = btn ? btn.textContent : '';
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Loading Microsoft sign-in…';
-    }
-
-    const auth = await getMsalInstance();
-    if (btn) btn.textContent = 'Opening Microsoft sign-in…';
-
-    const accounts = auth.getAllAccounts();
-    if (accounts.length > 0) {
-      currentUser = accounts[0];
-      await onSignedIn();
-    } else {
-      const loginResponse = await auth.loginPopup({ scopes, prompt: 'select_account' });
-      currentUser = loginResponse.account || auth.getAllAccounts()[0];
-      await onSignedIn();
-    }
-  } catch (e) {
-    console.error('Microsoft 365 sign-in failed:', e);
-    showToast('Sign in failed: ' + (e.errorMessage || e.message || 'Unknown Microsoft 365 error'), 'error');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = oldText || 'Sign in with Microsoft 365';
-    }
-  }
+// Uses full-page redirect (not popup) for sign-in. Popups can get blocked or
+// open as a detached window that doesn't auto-close, which looks like the app
+// is "stuck" on the Microsoft login screen. Redirect avoids that entirely -
+// the whole tab navigates to Microsoft, signs in, and navigates straight back.
+function signIn() {
+  msalInstance.loginRedirect({ scopes, prompt: 'select_account' });
+  // Browser navigates away here. Execution resumes on page reload via the
+  // BOOT block at the bottom of this script, which calls handleRedirectPromise().
 }
 
 async function getToken() {
-  const auth = await getMsalInstance();
   try {
-    const res = await auth.acquireTokenSilent({ scopes, account: currentUser });
-    return res.accessToken;
-  } catch {
-    const res = await auth.acquireTokenPopup({ scopes });
-    return res.accessToken;
+    return (await msalInstance.acquireTokenSilent({ scopes, account: currentUser })).accessToken;
+  } catch (e) {
+    // Silent refresh failed (e.g. session expired). Re-authenticate via redirect
+    // rather than a popup, for the same reason as signIn() above.
+    msalInstance.acquireTokenRedirect({ scopes });
+    // Execution pauses here as the browser navigates away.
+    return new Promise(() => {}); // never resolves; page is about to reload
   }
 }
 
-async function signOut() {
-  const auth = await getMsalInstance();
-  auth.logout();
+function signOut() {
+  msalInstance.logoutRedirect();
 }
 
 async function onSignedIn() {
   document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('screen-login').classList.remove('active');
   const name = currentUser.name || currentUser.username;
   document.getElementById('user-chip').textContent = name;
   showScreen('list');
@@ -1109,15 +1035,13 @@ async function onSignedIn() {
     await initSiteAndList();
     await loadItems();
   } catch (e) {
-    console.error('Microsoft 365 / SharePoint connection failed:', e);
-    const msg = escHtml(e.message || String(e));
+    console.error('SharePoint connection failed:', e);
     document.getElementById('cards-container').innerHTML = `
       <div class="empty-state">
-        <h3>Microsoft 365 connection failed</h3>
-        <p style="color:var(--high);margin-top:8px">${msg}</p>
-        <p style="margin-top:12px">Check Azure app consent, the GitHub Pages redirect URI, and the SharePoint list/library names.</p>
+        <h3>Couldn't connect to SharePoint</h3>
+        <p style="color:var(--high);margin-top:8px">${escHtml(e.message || String(e))}</p>
+        <p style="margin-top:12px;font-size:13px">This usually means the app's Graph API permissions haven't had admin consent granted yet, or the SharePoint list/library name doesn't match. Check the browser console (F12) for more detail.</p>
       </div>`;
-    showToast('Microsoft 365 connection failed', 'error');
   }
 }
 
@@ -1167,7 +1091,9 @@ async function initSiteAndList() {
   const siteRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${SP_HOST}:/`);
   siteId = siteRes.id;
 
-  // Fetch lists and match by display name. This is more reliable than using an encoded OData filter.
+  // Fetch all lists and match by display name directly.
+  // More reliable than an encoded OData filter, which can silently return
+  // zero results if SharePoint's internal list name doesn't exactly match.
   const listsRes = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists?$top=999`);
   const normalise = s => String(s || '').replace(/&/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
   const targetList = listsRes.value.find(l => l.displayName === LIST_NAME)
@@ -1176,7 +1102,7 @@ async function initSiteAndList() {
 
   if (!targetList) {
     const available = listsRes.value.map(l => l.displayName).join(', ');
-    throw new Error(`Could not find SharePoint list "${LIST_NAME}". Available lists: ${available}`);
+    throw new Error(`Could not find SharePoint list "${LIST_NAME}". Lists found on this site: ${available}`);
   }
   listId = targetList.id;
 
@@ -1187,14 +1113,17 @@ async function initSiteAndList() {
     || drivesRes.value[0];
 
   if (!targetDrive) {
-    throw new Error('Could not find a SharePoint document library / drive for file uploads.');
+    throw new Error('Could not find a SharePoint document library for file uploads.');
   }
   driveId = targetDrive.id;
 }
 
- // ── LOAD ITEMS ──
+// ── LOAD ITEMS ──
 async function loadItems() {
   try {
+    // Pull all fields rather than a hardcoded select list. SharePoint's internal
+    // field names (e.g. "ActionNotes") only match if guessed correctly -
+    // safer to expand everything and read what's actually there.
     const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
     const res = await apiGet(url);
     allItems = res.value.sort((a, b) => {
@@ -1247,7 +1176,7 @@ function renderCards() {
     const urgency = f.Urgency || '';
     const status  = f.Status?.Value || f.Status || 'Unassigned';
     const statusLabel = STATUS_LABELS[status] || status;
-    const imgUrl  = f.Preview_x0020_Image_x0020_URL || '';
+    const imgUrl  = f.PreviewImageURL || '';
     const thumb   = imgUrl
       ? `<img src="${imgUrl}" alt="" onerror="this.parentElement.innerHTML='<span class=card-thumb-placeholder><svg width=24 height=24 viewBox=0 0 24 24 fill=none stroke=currentColor stroke-width=1.5><rect x=3 y=3 width=18 height=18 rx=2/><circle cx=8.5 cy=8.5 r=1.5/><path d=m21 15-5-5L5 21/></svg></span>'">`
       : `<span class="card-thumb-placeholder"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>`;
@@ -1375,10 +1304,13 @@ async function submitRequest() {
         attachmentLinks.push(uploaded.webUrl);
       }
 
-      // 3. Patch attachment links back to item
+      // Set the card thumbnail to the first uploaded file. The full list of
+      // attachments isn't stored as a field - it's read live from the
+      // "RM Attachments/{itemId}/" folder each time (see getItemAttachments),
+      // so there's nothing to get out of sync.
       await apiPatch(
         `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-        { Attachments2: attachmentLinks.join('\n'), Preview_x0020_Image_x0020_URL: attachmentLinks[0] }
+        { PreviewImageURL: attachmentLinks[0] }
       );
     }
 
@@ -1419,13 +1351,29 @@ async function openDetail(itemId) {
   try {
     const item = await apiGet(`https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`);
     currentItem = item;
-    renderDetail(item);
+    const attachments = await getItemAttachments(itemId);
+    renderDetail(item, attachments);
   } catch (e) {
     document.getElementById('detail-body').innerHTML = `<p style="color:var(--high);padding:20px">Error: ${e.message}</p>`;
   }
 }
 
-function renderDetail(item) {
+// Reads the real list of files straight from the "RM Attachments/{itemId}/"
+// folder in SharePoint, rather than trusting a text field that could get out
+// of sync with what's actually there. Returns [] if the folder doesn't exist
+// yet (e.g. an item with no files uploaded).
+async function getItemAttachments(itemId) {
+  try {
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/RM Attachments/${itemId}:/children`;
+    const res = await apiGet(url);
+    return (res.value || []).map(f => ({ name: f.name, url: f.webUrl }));
+  } catch (e) {
+    // 404 just means no files uploaded for this item yet - not an error.
+    return [];
+  }
+}
+
+function renderDetail(item, attachments) {
   const f = item.fields;
   const id = item.id;
   const title   = f.Title || 'Untitled';
@@ -1437,12 +1385,12 @@ function renderDetail(item) {
   document.getElementById('detail-header-title').textContent = title;
 
   // Parse update log entries
-  const rawNotes = f.Action_x0020_Notes || '';
+  const rawNotes = f.ActionNotes || '';
   const logEntries = parseUpdateLog(rawNotes);
 
-  // Parse attachments
-  const attachLinks = (f.Attachments2 || '').split('\n').filter(l => l.trim());
-  const previewUrl  = f.Preview_x0020_Image_x0020_URL || '';
+  // Attachments are read live from the SharePoint folder (see getItemAttachments),
+  // not from a stored field, so this list is always accurate.
+  const previewUrl  = f.PreviewImageURL || '';
 
   // Created date
   const created = f.Created ? new Date(f.Created).toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '–';
@@ -1476,15 +1424,15 @@ function renderDetail(item) {
           <div class="detail-field-label">Recurring</div>
           <div class="detail-field-value">${f.Recurring ? `Yes${f.Frequency ? ' · ' + f.Frequency : ''}` : 'No'}</div>
         </div>
-        ${f.Value_x0020_in_x0020_kind ? `
+        ${f.Valueinkind ? `
         <div class="detail-field">
           <div class="detail-field-label">Value in Kind</div>
-          <div class="detail-field-value">${escHtml(f.Value_x0020_in_x0020_kind)}</div>
+          <div class="detail-field-value">${escHtml(f.Valueinkind)}</div>
         </div>` : ''}
-        ${f.Assign_x0020_to_x0020_group ? `
+        ${f.Assigntogroup ? `
         <div class="detail-field">
           <div class="detail-field-label">Assigned To</div>
-          <div class="detail-field-value">${escHtml(f.Assign_x0020_to_x0020_group)}</div>
+          <div class="detail-field-value">${escHtml(f.Assigntogroup)}</div>
         </div>` : ''}
         <div class="detail-field full">
           <div class="detail-field-label">Description</div>
@@ -1534,7 +1482,7 @@ function renderDetail(item) {
     <div class="detail-section">
       <div class="detail-section-title">Attachments</div>
       <div class="attachment-grid" id="attachment-grid">
-        ${renderAttachments(attachLinks)}
+        ${renderAttachments(attachments)}
       </div>
       <input type="file" id="detail-attach-input" multiple accept="image/*,.pdf,.doc,.docx" onchange="uploadDetailAttachment(event, '${id}')">
       <button class="btn-add-attachment" onclick="document.getElementById('detail-attach-input').click()">
@@ -1545,11 +1493,10 @@ function renderDetail(item) {
   `;
 }
 
-function renderAttachments(links) {
-  if (!links.length) return '<p style="font-size:13px;color:var(--muted);margin-bottom:8px">No attachments.</p>';
+function renderAttachments(attachments) {
+  if (!attachments || !attachments.length) return '<p style="font-size:13px;color:var(--muted);margin-bottom:8px">No attachments.</p>';
   const imageExts = /\.(jpg|jpeg|png|gif|webp|heic)$/i;
-  return links.map(url => {
-    const name = decodeURIComponent(url.split('/').pop());
+  return attachments.map(({ name, url }) => {
     const isImg = imageExts.test(name);
     return `
       <a class="attachment-link" href="${escHtml(url)}" target="_blank">
@@ -1586,12 +1533,12 @@ async function markComplete(itemId) {
     const stamp = `${now.toLocaleDateString('en-AU')} ${now.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}`;
     const completionNote = `UPDATE - ${stamp} - ${userName}\nMarked as complete.`;
 
-    const existing = currentItem?.fields?.Action_x0020_Notes || '';
+    const existing = currentItem?.fields?.ActionNotes || '';
     const combined = existing ? existing + '\n' + completionNote : completionNote;
 
     await apiPatch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-      { Status: 'Completed', Actioned: true, Action_x0020_Notes: combined }
+      { Status: 'Completed', Actioned: true, ActionNotes: combined }
     );
     showToast('Marked as complete', 'success');
     await loadItems();
@@ -1615,12 +1562,12 @@ async function submitNote(itemId) {
     const stamp = `${now.toLocaleDateString('en-AU')} ${now.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}`;
     const entry = `UPDATE - ${stamp} - ${userName}\n${noteText}`;
 
-    const existing = currentItem?.fields?.Action_x0020_Notes || '';
+    const existing = currentItem?.fields?.ActionNotes || '';
     const combined = existing ? existing + '\n' + entry : entry;
 
     await apiPatch(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-      { Action_x0020_Notes: combined }
+      { ActionNotes: combined }
     );
     showToast('Note added', 'success');
     await openDetail(itemId);
@@ -1637,25 +1584,17 @@ async function uploadDetailAttachment(e, itemId) {
   showToast('Uploading…');
 
   try {
-    const existing = (currentItem?.fields?.Attachments2 || '').split('\n').filter(l => l.trim());
-    const newLinks = [];
-
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const path = `RM Attachments/${itemId}/${safeName}`;
       const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${path}:/content`;
-      const uploaded = await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
-      newLinks.push(uploaded.webUrl);
+      await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
     }
-
-    const combined = [...existing, ...newLinks].join('\n');
-    await apiPatch(
-      `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items/${itemId}/fields`,
-      { Attachments2: combined }
-    );
 
     showToast('Attachment added', 'success');
     e.target.value = '';
+    // Re-opening re-reads the folder live, so the new file just appears -
+    // no field to keep in sync.
     await openDetail(itemId);
   } catch (e2) {
     showToast('Upload failed: ' + e2.message, 'error');
@@ -1686,7 +1625,7 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-var toastTimer = null;
+let toastTimer;
 function showToast(msg, type) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1696,4 +1635,31 @@ function showToast(msg, type) {
 }
 
 // ── BOOT ──
-// Disabled during live setup. Sign-in starts only when the button is clicked.
+(async () => {
+  try {
+    const result = await msalInstance.handleRedirectPromise();
+    const account = result?.account || msalInstance.getAllAccounts()[0];
+    if (account) {
+      currentUser = account;
+      msalInstance.setActiveAccount(account);
+      await onSignedIn();
+    }
+  } catch (e) {
+    console.error('Sign-in failed:', e);
+    const note = document.querySelector('.login-note');
+    if (note) {
+      note.innerHTML = `<span style="color:#ffb4b4">Sign-in error: ${escHtml(e.errorMessage || e.message || String(e))}</span>`;
+    }
+  }
+})();
+
+// Defensive: bind the login button via JS as well as inline onclick, in case
+// this file is ever hand-edited through GitHub's web editor and a stray
+// character breaks the inline handler without breaking the rest of the script.
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.querySelector('.btn-login');
+  if (btn) btn.addEventListener('click', signIn);
+});
+</script>
+</body>
+</html>
