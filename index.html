@@ -1085,6 +1085,21 @@ async function apiGet(url) {
   return res.json();
 }
 
+// Follows @odata.nextLink so lists larger than one Graph page load completely.
+// Without this, items beyond the first page silently vanish from the app.
+async function fetchAllPages(url, maxPages = 20) {
+  let results = [];
+  let next = url;
+  let pages = 0;
+  while (next && pages < maxPages) {
+    const res = await apiGet(next);
+    results = results.concat(res.value || []);
+    next = res['@odata.nextLink'] || null;
+    pages++;
+  }
+  return results;
+}
+
 async function apiPost(url, body) {
   const token = await getToken();
   const res = await fetch(url, {
@@ -1116,6 +1131,49 @@ async function apiPut(url, data, contentType) {
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// Graph's simple PUT upload is hard-capped at 4MB. Phone photos regularly
+// exceed that, so anything bigger goes through an upload session, which is
+// chunked and supports files up to 250MB. Hard ceiling of 60MB here to keep
+// the SharePoint library sane.
+const SIMPLE_UPLOAD_LIMIT = 3.5 * 1024 * 1024;
+const MAX_UPLOAD_SIZE = 60 * 1024 * 1024;
+
+async function uploadFileToDrive(itemPath, file) {
+  if (file.size > MAX_UPLOAD_SIZE) {
+    throw new Error(`"${file.name}" is ${(file.size/1048576).toFixed(1)}MB. Files must be under 60MB.`);
+  }
+
+  const base = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${itemPath}`;
+
+  if (file.size <= SIMPLE_UPLOAD_LIMIT) {
+    return apiPut(`${base}:/content`, file, file.type || 'application/octet-stream');
+  }
+
+  // Large file: create an upload session and send in 5MB chunks.
+  const session = await apiPost(`${base}:/createUploadSession`, {
+    item: { '@microsoft.graph.conflictBehavior': 'rename' }
+  });
+  const chunkSize = 5 * 1024 * 1024;
+  let start = 0;
+  let result = null;
+  while (start < file.size) {
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    const res = await fetch(session.uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Length': String(end - start),
+        'Content-Range': `bytes ${start}-${end - 1}/${file.size}`
+      },
+      body: chunk
+    });
+    if (!res.ok) throw new Error(`Upload failed at ${(start/1048576).toFixed(1)}MB: ${await res.text()}`);
+    if (res.status === 200 || res.status === 201) result = await res.json();
+    start = end;
+  }
+  return result;
 }
 
 // ── INIT ──
@@ -1157,8 +1215,8 @@ async function loadItems() {
     // field names (e.g. "ActionNotes") only match if guessed correctly -
     // safer to expand everything and read what's actually there.
     const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${listId}/items?expand=fields&$top=999`;
-    const res = await apiGet(url);
-    allItems = res.value.sort((a, b) => {
+    const items = await fetchAllPages(url);
+    allItems = items.sort((a, b) => {
       const ua = URGENCY_ORDER[a.fields.Urgency] ?? 99;
       const ub = URGENCY_ORDER[b.fields.Urgency] ?? 99;
       if (ua !== ub) return ua - ub;
@@ -1166,7 +1224,7 @@ async function loadItems() {
     });
     renderCards();
   } catch (e) {
-    document.getElementById('cards-container').innerHTML = `<div class="empty-state"><p style="color:var(--high)">Failed to load items: ${e.message}</p></div>`;
+    document.getElementById('cards-container').innerHTML = `<div class="empty-state"><p style="color:var(--high)">Failed to load items: ${escHtml(e.message)}</p></div>`;
   }
 }
 
@@ -1208,7 +1266,10 @@ function renderCards() {
     const urgency = f.Urgency || '';
     const status  = f.Status?.Value || f.Status || 'Unassigned';
     const statusLabel = STATUS_LABELS[status] || status;
-    const imgUrl  = f.PreviewImageURL || '';
+    // Only render preview URLs that are genuine https links, and escape the
+    // attribute. Stops a crafted field value from injecting markup or script.
+    const rawImgUrl = f.PreviewImageURL || '';
+    const imgUrl  = /^https:\/\//i.test(rawImgUrl) ? escHtml(rawImgUrl) : '';
     const thumb   = imgUrl
       ? `<img src="${imgUrl}" alt="" onerror="this.parentElement.innerHTML='<span class=card-thumb-placeholder><svg width=24 height=24 viewBox=0 0 24 24 fill=none stroke=currentColor stroke-width=1.5><rect x=3 y=3 width=18 height=18 rx=2/><circle cx=8.5 cy=8.5 r=1.5/><path d=m21 15-5-5L5 21/></svg></span>'">`
       : `<span class="card-thumb-placeholder"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></span>`;
@@ -1331,8 +1392,7 @@ async function submitRequest() {
       for (const file of selectedFiles) {
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const path = `RM Attachments/${itemId}/${safeName}`;
-        const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${path}:/content`;
-        const uploaded = await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
+        const uploaded = await uploadFileToDrive(path, file);
         attachmentLinks.push(uploaded.webUrl);
       }
 
@@ -1386,7 +1446,7 @@ async function openDetail(itemId) {
     const attachments = await getItemAttachments(itemId);
     renderDetail(item, attachments);
   } catch (e) {
-    document.getElementById('detail-body').innerHTML = `<p style="color:var(--high);padding:20px">Error: ${e.message}</p>`;
+    document.getElementById('detail-body').innerHTML = `<p style="color:var(--high);padding:20px">Error: ${escHtml(e.message)}</p>`;
   }
 }
 
@@ -1619,8 +1679,7 @@ async function uploadDetailAttachment(e, itemId) {
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const path = `RM Attachments/${itemId}/${safeName}`;
-      const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/root:/${path}:/content`;
-      await apiPut(uploadUrl, file, file.type || 'application/octet-stream');
+      await uploadFileToDrive(path, file);
     }
 
     showToast('Attachment added', 'success');
@@ -1654,7 +1713,7 @@ function parseUpdateLog(raw) {
 // ── UTILS ──
 function escHtml(str) {
   if (str == null) return '';
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 let toastTimer;
